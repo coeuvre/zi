@@ -1,24 +1,52 @@
+#[macro_use]
+extern crate bitflags;
 extern crate libc;
 
 use std::io;
 use std::io::prelude::*;
 
+struct Termios {
+    fd: libc::c_int,
+    orig: libc::termios,
+}
+
+impl Termios {
+    pub fn new(fd: libc::c_int) -> Termios {
+        unsafe {
+            use std::mem;
+            let mut termios = mem::uninitialized();
+            libc::tcgetattr(fd, &mut termios);
+            let orig = termios.clone();
+
+            termios.c_lflag &= !(libc::ECHO | libc::ECHONL | libc::ICANON | libc::ISIG | libc::IEXTEN);
+            libc::tcsetattr(fd, libc::TCSAFLUSH, &termios);
+
+            Termios {
+                fd: fd,
+                orig: orig,
+            }
+        }
+    }
+}
+
+impl Drop for Termios {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSAFLUSH, &self.orig);
+        }
+    }
+}
+
 pub struct AsciiTerm {
     out: io::Stdout,
+    _termios: Termios,
 }
 
 impl AsciiTerm {
     pub fn new() -> AsciiTerm {
-        unsafe {
-            use std::mem;
-            let mut termios = mem::uninitialized();
-            libc::tcgetattr(1, &mut termios);
-            termios.c_lflag &= !(libc::ECHO | libc::ICANON);
-            libc::tcsetattr(1, libc::TCSAFLUSH, &termios);
-        }
-
         AsciiTerm {
             out: io::stdout(),
+            _termios: Termios::new(1),
         }
     }
 
@@ -56,6 +84,24 @@ impl AsciiTerm {
     }
 }
 
+pub enum Key {
+    Unknown,
+    Unicode(char),
+}
+
+bitflags! {
+    pub flags KeyMod: u8 {
+        const KEY_MOD_NONE = 0,
+        const KEY_MOD_SHIFT = 1 << 0,
+        const KEY_MOD_ALT = 1 << 1,
+        const KEY_MOD_CTRL = 1 << 2,
+    }
+}
+
+pub enum Event {
+    Key(Key, KeyMod),
+}
+
 fn main() {
     let mut term = AsciiTerm::new();
     term.clear();
@@ -69,21 +115,48 @@ fn main() {
 
     'input: loop {
         match io::stdin().read(&mut buf) {
-            Ok(_) => {
+            Ok(n) => {
+                let key = {
+                    if n == 1 {
+                        let ch = buf[0];
+                        use std::ascii::AsciiExt;
+                        if ch.is_ascii() {
+                            Key::Unicode(ch as char)
+                        } else {
+                            Key::Unknown
+                        }
+                    } else {
+                        Key::Unknown
+                    }
+                };
+
+                match key {
+                    Key::Unicode(codepoint) => {
+                        match codepoint {
+                            'h' => term.cursor_back(1),
+                            'j' => term.cursor_down(1),
+                            'k' => term.cursor_up(1),
+                            'l' => term.cursor_forward(1),
+                            'q' => break 'input,
+                            _ => { term.print(codepoint); }
+                        }
+                    }
+
+                    _ => {}
+                }
+
+                /*
+                for i in 0..n {
+                    print!("0x{:x}", buf[i]);
+                }
+
                 let input = String::from_utf8_lossy(&buf);
                 if let Some(ch) = input.chars().next() {
-                    match ch {
-                        'h' => term.cursor_back(1),
-                        'j' => term.cursor_down(1),
-                        'k' => term.cursor_up(1),
-                        'l' => term.cursor_forward(1),
-                        'q' => break 'input,
-                        _ => {}
-                    }
                 }
+                */
             }
 
-            Err(e) => panic!(e),
+            Err(e) => println!("Err: {}", e),
         }
 
         term.flush();

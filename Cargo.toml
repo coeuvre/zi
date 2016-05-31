@@ -5,3 +5,4 @@ authors = ["Coeuvre Wong <coeuvre@gmail.com>"]
 
 [dependencies]
 libc = "*"
+bitflags = "*"
