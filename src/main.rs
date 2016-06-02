@@ -10,7 +10,7 @@ fn main() {
     let mut term = Term::new();
     term.clear();
     term.move_cursor(0, 10);
-    for ch in "Hello World\n".chars() {
+    for ch in "Hello World".chars() {
         term.print(ch);
     }
     term.flush();

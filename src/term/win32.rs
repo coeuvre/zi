@@ -4,34 +4,60 @@ extern crate kernel32;
 use super::{Event, Key, Term, KEY_MOD_NONE};
 
 use libc;
+use std::io;
+use std::io::prelude::*;
 use std::ffi::CString;
 use std::mem;
 
+use self::winapi::winnt::*;
+use self::winapi::minwindef::*;
+use self::winapi::winbase::*;
+use self::winapi::wincon::*;
+use self::kernel32::*;
+
 pub struct Win32Term {
-    input: winapi::winnt::HANDLE,
-    orig_input_mode: winapi::minwindef::DWORD,
+    input: HANDLE,
+    output: winapi::winnt::HANDLE,
+    cursor_pos: (u16, u16),
+
+    orig_input_mode: DWORD,
+    orig_cursor_info: CONSOLE_CURSOR_INFO,
+    orig_screen_buffer_info: CONSOLE_SCREEN_BUFFER_INFOEX,
 }
 
 impl Win32Term {
     pub fn new() -> Win32Term {
         unsafe {
+            let input = GetStdHandle(STD_INPUT_HANDLE);
+            let output = GetStdHandle(STD_OUTPUT_HANDLE);
+
+            let mut orig_cursor_info = mem::uninitialized();
+            GetConsoleCursorInfo(output, &mut orig_cursor_info);
+
+            let mut orig_screen_buffer_info = mem::uninitialized();
+            GetConsoleScreenBufferInfoEx(output, &mut orig_screen_buffer_info);
+
             let mut orig_input_mode = mem::uninitialized();
-            let input = kernel32::GetStdHandle(winapi::winbase::STD_INPUT_HANDLE);
-            kernel32::GetConsoleMode(input, &mut orig_input_mode);
-            kernel32::SetConsoleMode(input, winapi::wincon::ENABLE_MOUSE_INPUT | winapi::wincon::ENABLE_WINDOW_INPUT);
+            GetConsoleMode(input, &mut orig_input_mode);
+            SetConsoleMode(input, ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT);
             Win32Term {
                 input: input,
+                output: output,
+                cursor_pos: (0, 0),
+
                 orig_input_mode: orig_input_mode,
+                orig_cursor_info: orig_cursor_info,
+                orig_screen_buffer_info: orig_screen_buffer_info,
             }
         }
     }
 }
 
 pub struct WaitEventIter {
-    input: winapi::winnt::HANDLE,
+    input: HANDLE,
     count: u32,
     read: u32,
-    buf: [winapi::wincon::INPUT_RECORD; 128],
+    buf: [INPUT_RECORD; 128],
 }
 
 impl Iterator for WaitEventIter {
@@ -41,7 +67,7 @@ impl Iterator for WaitEventIter {
         if self.read >= self.count {
             self.read = 0;
             unsafe {
-                kernel32::ReadConsoleInputW(self.input, self.buf.as_mut_ptr(), self.buf.len() as u32, &mut self.count);
+                ReadConsoleInputW(self.input, self.buf.as_mut_ptr(), self.buf.len() as u32, &mut self.count);
             }
         }
 
@@ -51,14 +77,14 @@ impl Iterator for WaitEventIter {
 
             unsafe {
                 match record.EventType {
-                    winapi::wincon::KEY_EVENT => {
+                    KEY_EVENT => {
                         let key_event = record.KeyEvent();
                         if key_event.bKeyDown != 0 {
                             return Some(Event::Key(Key::Unicode(*key_event.AsciiChar() as u8 as char), KEY_MOD_NONE));
                         }
                     }
 
-                    _ => { unreachable!(); }
+                    _ => {}
                 }
             }
         }
@@ -70,7 +96,9 @@ impl Iterator for WaitEventIter {
 impl Drop for Win32Term {
     fn drop(&mut self) {
         unsafe {
-            kernel32::SetConsoleMode(self.input, self.orig_input_mode);
+            SetConsoleMode(self.input, self.orig_input_mode);
+            SetConsoleCursorInfo(self.output, &mut self.orig_cursor_info);
+            SetConsoleScreenBufferInfoEx(self.output, &mut self.orig_screen_buffer_info);
         }
     }
 }
@@ -83,24 +111,52 @@ impl Term for Win32Term {
     }
 
     fn move_cursor(&mut self, row: u16, col: u16) {
+        unsafe {
+            let coord = winapi::wincon::COORD {
+                X: col as i16,
+                Y: row as i16,
+            };
+            kernel32::SetConsoleCursorPosition(self.output, coord);
+            self.cursor_pos = (row, col);
+        }
     }
 
     fn cursor_up(&mut self, n: u16) {
+        let (row, col) = self.cursor_pos;
+        if row >= n {
+            self.move_cursor(row - n, col);
+        }
     }
 
     fn cursor_down(&mut self, n: u16) {
+        let (row, col) = self.cursor_pos;
+        self.move_cursor(row + n, col);
     }
 
     fn cursor_forward(&mut self, n: u16) {
+        let (row, col) = self.cursor_pos;
+        self.move_cursor(row, col + n);
     }
 
     fn cursor_back(&mut self, n: u16) {
+        let (row, col) = self.cursor_pos;
+        if col >= n {
+            self.move_cursor(row, col - n);
+        }
     }
 
     fn print(&mut self, ch: char) {
+        print!("{}", ch);
+        if ch == '\n' {
+            self.cursor_pos.0 += 1;
+            self.cursor_pos.1 = 0;
+        } else {
+            self.cursor_pos.1 += 1;
+        }
     }
 
     fn flush(&mut self) {
+        io::stdout().flush().unwrap();
     }
 
     fn wait_events(&mut self) -> Box<Iterator<Item=Event>> {
