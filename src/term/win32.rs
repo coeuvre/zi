@@ -110,48 +110,50 @@ impl Term for Win32Term {
         }
     }
 
-    fn move_cursor(&mut self, row: u16, col: u16) {
+    fn move_cursor(&mut self, x: u16, y: u16) {
         unsafe {
             let coord = winapi::wincon::COORD {
-                X: col as i16,
-                Y: row as i16,
+                X: x as i16,
+                Y: y as i16,
             };
             kernel32::SetConsoleCursorPosition(self.output, coord);
-            self.cursor_pos = (row, col);
+            self.cursor_pos = (x, y);
         }
     }
 
     fn cursor_up(&mut self, n: u16) {
-        let (row, col) = self.cursor_pos;
-        if row >= n {
-            self.move_cursor(row - n, col);
+        let (x, y) = self.cursor_pos;
+        if y >= n {
+            self.move_cursor(x, y - n);
         }
     }
 
     fn cursor_down(&mut self, n: u16) {
-        let (row, col) = self.cursor_pos;
-        self.move_cursor(row + n, col);
+        let (x, y) = self.cursor_pos;
+        self.move_cursor(x, y + n);
     }
 
     fn cursor_forward(&mut self, n: u16) {
-        let (row, col) = self.cursor_pos;
-        self.move_cursor(row, col + n);
+        let (x, y) = self.cursor_pos;
+        self.move_cursor(x + n, y);
     }
 
     fn cursor_back(&mut self, n: u16) {
-        let (row, col) = self.cursor_pos;
-        if col >= n {
-            self.move_cursor(row, col - n);
+        let (x, y) = self.cursor_pos;
+        if x >= n {
+            self.move_cursor(x - n, y);
         }
     }
 
     fn print(&mut self, ch: char) {
         print!("{}", ch);
         if ch == '\n' {
-            self.cursor_pos.0 += 1;
-            self.cursor_pos.1 = 0;
-        } else {
             self.cursor_pos.1 += 1;
+            self.cursor_pos.0 = 0;
+        } else if ch == '\r' {
+            self.cursor_pos.0 = 0;
+        } else {
+            self.cursor_pos.0 += 1;
         }
     }
 

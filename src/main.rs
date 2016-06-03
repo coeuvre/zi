@@ -3,17 +3,33 @@ extern crate bitflags;
 extern crate libc;
 
 use term::*;
+use screen::*;
 
 mod term;
+mod screen;
+
+fn screen_to_term(screen: &Screen, term: &mut Term) {
+    term.clear();
+    for (x, y, cell) in screen.cells() {
+        if let Some(ref grapheme) = cell.grapheme {
+            term.move_cursor(x, y);
+            print!("{}", grapheme.character());
+            term.flush();
+        }
+    }
+}
 
 fn main() {
     let mut term = Term::new();
-    term.clear();
-    term.move_cursor(0, 10);
-    for ch in "Hello World".chars() {
-        term.print(ch);
-    }
-    term.flush();
+    let mut screen = Screen::new(80, 25);
+
+    screen.cell_at_mut(0, 0).unwrap().grapheme = Some(Grapheme::new("H"));
+    screen.cell_at_mut(0, 1).unwrap().grapheme = Some(Grapheme::new("e"));
+    screen.cell_at_mut(0, 2).unwrap().grapheme = Some(Grapheme::new("l"));
+    screen.cell_at_mut(0, 3).unwrap().grapheme = Some(Grapheme::new("l"));
+    screen.cell_at_mut(0, 4).unwrap().grapheme = Some(Grapheme::new("o"));
+
+    screen_to_term(&screen, &mut *term);
 
     'input: loop {
         for event in term.wait_events() {

@@ -12,7 +12,7 @@ pub type DefaultTerm = win32::Win32Term;
 pub trait Term {
     fn clear(&mut self);
 
-    fn move_cursor(&mut self, row: u16, col: u16);
+    fn move_cursor(&mut self, x: u16, y: u16);
 
     fn cursor_up(&mut self, n: u16);
 
